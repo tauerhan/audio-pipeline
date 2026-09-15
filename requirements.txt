@@ -1,0 +1,5 @@
+faster-whisper==1.2.1
+requests==2.34.2
+PyYAML==6.0.3
+python-slugify==8.0.4
+tqdm==4.67.3

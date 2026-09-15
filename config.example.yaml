@@ -1,0 +1,34 @@
+source_dir: "./data/inbox"
+obsidian_dir: "./data/vault/Audio"
+
+model: "medium"
+retry_model: "large-v3"
+language: "ru"
+
+audio_extensions:
+  - ".mp3"
+  - ".wav"
+  - ".m4a"
+  - ".aac"
+  - ".flac"
+  - ".ogg"
+  - ".opus"
+  - ".wma"
+
+convert:
+  sample_rate: 16000
+  channels: 1
+
+transcription:
+  device: "cpu"
+  compute_type: "int8"
+  vad_filter: true
+
+ai:
+  enabled: false
+  url: "http://localhost:11434/api/generate"
+  ollama_url: "http://localhost:11434/api/generate"
+  model: "qwen2.5:7b-instruct"
+  summary_timeout: 1800
+  summary_text_limit: 5000
+  summary_num_ctx: 4096

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "samples": [
+    {
+      "id": "ru-clean-001",
+      "category": "clean_speech",
+      "audio_path": "/path/to/private/samples/ru-clean-001.wav",
+      "reference_path": "/path/to/private/references/ru-clean-001.txt",
+      "language": "ru"
+    }
+  ]
+}
