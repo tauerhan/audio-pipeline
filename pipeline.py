@@ -8,20 +8,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any
 
-import requests
-import yaml
-from slugify import slugify
-from tqdm import tqdm
-from faster_whisper import WhisperModel
+from pipeline_config import ConfigError, load_config
 
 
 STATE_FILE = "pipeline_state.json"
 INDEX_FILE = "pipeline_index.csv"
-
-
-def load_config():
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def load_state(state_path: Path):
@@ -29,7 +20,13 @@ def load_state(state_path: Path):
         return {"files": {}}
 
     with state_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        state = json.load(f)
+
+    if not isinstance(state, dict) or not isinstance(state.get("files"), dict):
+        raise ValueError("Некорректное состояние: ожидается словарь files")
+    if not all(isinstance(item, dict) for item in state["files"].values()):
+        raise ValueError("Некорректное состояние: записи files должны быть словарями")
+    return state
 
 
 def save_state(state_path: Path, state: dict):
@@ -140,6 +137,8 @@ def human_title_from_filename(path: Path) -> str:
 
 
 def safe_title_text(text: str, fallback: str = "audio") -> str:
+    from slugify import slugify
+
     title = slugify(text, separator="-", lowercase=True)[:90]
     return title or fallback
 
@@ -184,7 +183,13 @@ def filter_files(files, include=None):
     return files
 
 
-def convert_to_wav(src: Path, dst: Path, sample_rate: int, channels: int):
+def convert_to_wav(
+    src: Path,
+    dst: Path,
+    sample_rate: int,
+    channels: int,
+    audio_filter: str | None = None,
+):
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -194,9 +199,10 @@ def convert_to_wav(src: Path, dst: Path, sample_rate: int, channels: int):
         "-vn",
         "-ac", str(channels),
         "-ar", str(sample_rate),
-        "-af", "highpass=f=80,lowpass=f=8000,dynaudnorm",
-        str(dst),
     ]
+    if audio_filter:
+        cmd.extend(["-af", audio_filter])
+    cmd.append(str(dst))
 
     subprocess.run(
         cmd,
@@ -204,7 +210,16 @@ def convert_to_wav(src: Path, dst: Path, sample_rate: int, channels: int):
         stderr=subprocess.DEVNULL,
         check=True,
     )
-def transcribe(model, wav_path: Path, language: str, vad_filter: bool):
+
+
+def transcribe(
+    model,
+    wav_path: Path,
+    language: str,
+    vad_filter: bool = False,
+    condition_on_previous_text: bool = False,
+    hotwords: str | None = None,
+):
     segments, info = model.transcribe(
         str(wav_path),
         language=language,
@@ -215,12 +230,8 @@ def transcribe(model, wav_path: Path, language: str, vad_filter: bool):
         compression_ratio_threshold=2.4,
         log_prob_threshold=-1.0,
         no_speech_threshold=0.6,
-        condition_on_previous_text=True,
-        initial_prompt=(
-            "Русская речь. Экспедиция, поездка, разговор, интервью. "
-            "Возможен шум машины, ветер, дорога, музыка."
-        ),
-        prompt_reset_on_temperature=0.5,
+        condition_on_previous_text=condition_on_previous_text,
+        hotwords=hotwords or None,
     )
 
     rows = []
@@ -234,6 +245,15 @@ def transcribe(model, wav_path: Path, language: str, vad_filter: bool):
             full_text.append(text)
 
     return rows, "\n".join(full_text)
+
+def normalize_hotwords(values: Any) -> str | None:
+    if isinstance(values, str):
+        return values.strip() or None
+    if isinstance(values, list):
+        terms = [str(value).strip() for value in values if str(value).strip()]
+        return ", ".join(terms) or None
+    return None
+
 
 def extract_basic_tags(original: Path, full_text: str):
     tags = ["audio", "transcript"]
@@ -285,6 +305,24 @@ def extract_basic_tags(original: Path, full_text: str):
     return sorted(set(tags))
 
 
+def retain_verbatim_people(values: Any, transcript: str) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    people = []
+    seen = set()
+    for value in values:
+        candidate = str(value).strip()
+        if not candidate:
+            continue
+        pattern = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in candidate.split()) + r"(?!\w)"
+        match = re.search(pattern, transcript, flags=re.IGNORECASE)
+        if match and match.group(0).casefold() not in seen:
+            people.append(match.group(0))
+            seen.add(match.group(0).casefold())
+    return people
+
+
 def make_stub_ai(original: Path, full_text: str, basic_tags: list[str]) -> dict[str, Any]:
     title = human_title_from_filename(original)
 
@@ -307,8 +345,12 @@ def call_ollama_ai(cfg: dict, original: Path, full_text: str, basic_tags: list[s
     if not ai_cfg.get("enabled", False):
         return make_stub_ai(original, full_text, basic_tags)
 
+    import requests
+
     prompt = f"""
 Ты анализируешь расшифровку аудио экспедиции.
+
+Для поля people используй только точные фрагменты расшифровки, сохраняя исходный язык и написание; не переводи, например, «Учитель» в teacher. Если обозначение человека не встречается в расшифровке в таком написании, не добавляй его в people.
 
 Верни JSON:
 
@@ -352,6 +394,7 @@ def call_ollama_ai(cfg: dict, original: Path, full_text: str, basic_tags: list[s
         parsed["tags"] = sorted(
             set(basic_tags + parsed.get("tags", []))
         )
+        parsed["people"] = retain_verbatim_people(parsed.get("people"), full_text)
 
         parsed["summary_status"] = "ready"
 
@@ -506,6 +549,7 @@ def cleanup_wav(wav_path: Path, keep_processed_audio: bool):
 def main():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--include", type=str)
@@ -515,7 +559,13 @@ def main():
 
     args = parser.parse_args()
 
-    cfg = load_config()
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit должен быть положительным целым числом")
+
+    try:
+        cfg = load_config(args.config)
+    except (ConfigError, OSError, RuntimeError) as error:
+        parser.error(str(error))
 
     source_dir = Path(cfg["source_dir"])
     obsidian_dir = Path(cfg["obsidian_dir"])
@@ -526,10 +576,10 @@ def main():
     index_path = obsidian_dir / INDEX_FILE
     state_path = obsidian_dir / STATE_FILE
 
-    processed_audio_dir.mkdir(parents=True, exist_ok=True)
-    transcripts_dir.mkdir(parents=True, exist_ok=True)
-
-    state = load_state(state_path)
+    try:
+        state = load_state(state_path)
+    except (OSError, ValueError) as error:
+        parser.error(f"Не удалось прочитать состояние: {error}")
 
     audio_files = find_audio_files(
         source_dir,
@@ -579,11 +629,17 @@ def main():
         print("Новых файлов нет.")
         return
 
+    from faster_whisper import WhisperModel
+    from tqdm import tqdm
+
     model = WhisperModel(
         cfg["model"],
         device=cfg["transcription"]["device"],
         compute_type=cfg["transcription"]["compute_type"],
     )
+
+    processed_audio_dir.mkdir(parents=True, exist_ok=True)
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
 
     for src in tqdm(files_to_process):
         original_qid = quick_file_id(src)
@@ -608,6 +664,7 @@ def main():
                 wav_path,
                 cfg["convert"]["sample_rate"],
                 cfg["convert"]["channels"],
+                cfg["convert"].get("audio_filter"),
             )
 
             rows, full_text = transcribe(
@@ -615,6 +672,8 @@ def main():
                 wav_path,
                 cfg["language"],
                 cfg["transcription"]["vad_filter"],
+                cfg["transcription"].get("condition_on_previous_text", False),
+                hotwords=normalize_hotwords(cfg["transcription"].get("hotwords")),
             )
 
             basic_tags = extract_basic_tags(src, full_text)

@@ -1,7 +1,7 @@
 source_dir: "./data/inbox"
 obsidian_dir: "./data/vault/Audio"
 
-model: "medium"
+model: "large-v3"
 retry_model: "large-v3"
 language: "ru"
 
@@ -18,11 +18,14 @@ audio_extensions:
 convert:
   sample_rate: 16000
   channels: 1
+  audio_filter: null
 
 transcription:
   device: "cpu"
-  compute_type: "int8"
-  vad_filter: true
+  compute_type: "float32"
+  vad_filter: false
+  condition_on_previous_text: false
+  hotwords: []
 
 ai:
   enabled: false

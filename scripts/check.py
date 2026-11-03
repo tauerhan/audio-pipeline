@@ -9,6 +9,10 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from pipeline_config import load_config
+
 REQUIRED = (
     "README.md",
     "AGENTS.md",
@@ -41,34 +45,7 @@ def git(*arguments, input_text=None):
 
 
 def check_config(path):
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict):
-        raise ValueError(f"{path.name}: expected a YAML mapping")
-    for name in ("source_dir", "obsidian_dir", "model", "language"):
-        if not isinstance(config.get(name), str) or not config[name].strip():
-            raise ValueError(f"{path.name}: missing or empty {name}")
-    if config["language"] != "ru":
-        raise ValueError(f"{path.name}: this project expects language ru")
-    extensions = config.get("audio_extensions")
-    if not isinstance(extensions, list) or not extensions:
-        raise ValueError(f"{path.name}: audio_extensions must be a nonempty list")
-    if not all(isinstance(value, str) and value.startswith(".") for value in extensions):
-        raise ValueError(f"{path.name}: invalid audio extension")
-    for section, names in {
-        "convert": ("sample_rate", "channels"),
-        "transcription": ("device", "compute_type", "vad_filter"),
-    }.items():
-        if not isinstance(config.get(section), dict):
-            raise ValueError(f"{path.name}: missing {section} mapping")
-        for name in names:
-            if name not in config[section]:
-                raise ValueError(f"{path.name}: missing {section}.{name}")
-    for name in ("sample_rate", "channels"):
-        value = config["convert"][name]
-        if type(value) is not int or value <= 0:
-            raise ValueError(f"{path.name}: convert.{name} must be a positive integer")
-    if type(config["transcription"]["vad_filter"]) is not bool:
-        raise ValueError(f"{path.name}: vad_filter must be boolean")
+    load_config(path, check_paths=False)
 
 
 def check_repository():

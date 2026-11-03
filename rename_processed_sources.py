@@ -4,11 +4,7 @@ from pathlib import Path
 import yaml
 from slugify import slugify
 from tqdm import tqdm
-
-
-TRANSCRIPTS_DIR = Path(
-    "/media/sf_D_DRIVE/YandexDisk/Obsidian Vault/Expeditions/transcripts"
-)
+from pipeline_config import load_config
 
 
 def safe_name(text: str) -> str:
@@ -106,7 +102,9 @@ def rename_source(md_path: Path):
 
 
 def main():
-    files = sorted(TRANSCRIPTS_DIR.glob("*.md"))
+    config = load_config()
+    transcripts_dir = Path(config["obsidian_dir"]) / "transcripts"
+    files = sorted(transcripts_dir.glob("*.md"))
 
     print(f"Найдено md: {len(files)}")
 

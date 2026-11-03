@@ -247,6 +247,7 @@ def call_ollama(cfg: dict, metadata: dict, transcript: str) -> dict:
     text_limit = int(ai_cfg.get("summary_text_limit", ai_cfg.get("text_limit", 5000)))
     num_ctx = int(ai_cfg.get("summary_num_ctx", ai_cfg.get("num_ctx", 4096)))
 
+    source_transcript = transcript
     transcript = crop_text(transcript, text_limit)
 
     prompt = f"""
@@ -266,7 +267,8 @@ def call_ollama(cfg: dict, metadata: dict, transcript: str) -> dict:
 
 Правила:
 - Не выдумывай людей и места, если их нет в тексте.
-- Если имя распознано неуверенно, всё равно добавь его, но в исходной форме из текста.
+- Для поля people используй только точные фрагменты расшифровки, сохраняя исходный язык и написание; не переводи, например, «Учитель» в teacher.
+- Если имя или обозначение человека не встречается в расшифровке в таком написании, не добавляй его в people.
 - Теги должны быть короткими, без #, без пробелов, лучше через дефис.
 - Summary должно быть 5-10 предложений.
 - Не давай медицинских или мистических утверждений от себя; только описывай содержание записи.
@@ -313,10 +315,28 @@ def call_ollama(cfg: dict, metadata: dict, transcript: str) -> dict:
             raise ValueError(f"Ollama returned non-JSON response: {raw[:1000]}")
         data = json.loads(match.group(0))
 
-    return normalize_ai_result(data, metadata)
+    return normalize_ai_result(data, metadata, source_transcript)
 
 
-def normalize_ai_result(data: dict, metadata: dict) -> dict:
+def retain_verbatim_people(values: Any, transcript: str) -> list[str]:
+    if not isinstance(values, list):
+        return []
+
+    people = []
+    seen = set()
+    for value in values:
+        candidate = str(value).strip()
+        if not candidate:
+            continue
+        pattern = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in candidate.split()) + r"(?!\w)"
+        match = re.search(pattern, transcript, flags=re.IGNORECASE)
+        if match and match.group(0).casefold() not in seen:
+            people.append(match.group(0))
+            seen.add(match.group(0).casefold())
+    return people
+
+
+def normalize_ai_result(data: dict, metadata: dict, transcript: str) -> dict:
     title = clean_yaml_scalar(data.get("title") or metadata.get("title") or "Без названия")
     short_title = clean_yaml_scalar(data.get("short_title") or title)
 
@@ -338,11 +358,7 @@ def normalize_ai_result(data: dict, metadata: dict) -> dict:
         )
     )
 
-    people = [
-        clean_yaml_scalar(x)
-        for x in data.get("people", [])
-        if str(x).strip()
-    ]
+    people = [clean_yaml_scalar(x) for x in retain_verbatim_people(data.get("people"), transcript)]
 
     places = [
         clean_yaml_scalar(x)
