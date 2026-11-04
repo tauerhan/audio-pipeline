@@ -23,8 +23,10 @@ convert:
 transcription:
   device: "cpu"
   compute_type: "float32"
-  vad_filter: false
-  condition_on_previous_text: false
+  vad_filter: true
+  condition_on_previous_text: true
+  initial_prompt: "Русская речь. Экспедиция, поездка, разговор, интервью. Возможен шум машины, ветер, дорога, музыка."
+  prompt_reset_on_temperature: 0.5
   hotwords: []
 
 ai:
