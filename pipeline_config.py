@@ -46,8 +46,14 @@ def validate_config(config):
         raise ConfigError("Неизвестный transcription.compute_type")
     if type(config["transcription"].get("vad_filter")) is not bool:
         raise ConfigError("transcription.vad_filter должен быть true или false")
-    if type(config["transcription"].get("condition_on_previous_text", False)) is not bool:
+    if type(config["transcription"].get("condition_on_previous_text", True)) is not bool:
         raise ConfigError("transcription.condition_on_previous_text должен быть true или false")
+    initial_prompt = config["transcription"].get("initial_prompt")
+    if initial_prompt is not None and not isinstance(initial_prompt, str):
+        raise ConfigError("transcription.initial_prompt должен быть строкой или null")
+    prompt_reset = config["transcription"].get("prompt_reset_on_temperature", 0.5)
+    if isinstance(prompt_reset, bool) or not isinstance(prompt_reset, (int, float)) or not 0 <= prompt_reset <= 1:
+        raise ConfigError("transcription.prompt_reset_on_temperature должен быть числом от 0 до 1")
     hotwords = config["transcription"].get("hotwords", [])
     if not isinstance(hotwords, (str, list)) or (isinstance(hotwords, list) and not all(isinstance(item, str) for item in hotwords)):
         raise ConfigError("transcription.hotwords должен быть строкой или списком строк")
