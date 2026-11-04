@@ -217,7 +217,9 @@ def transcribe(
     wav_path: Path,
     language: str,
     vad_filter: bool = False,
-    condition_on_previous_text: bool = False,
+    condition_on_previous_text: bool = True,
+    initial_prompt: str | None = None,
+    prompt_reset_on_temperature: float = 0.5,
     hotwords: str | None = None,
 ):
     segments, info = model.transcribe(
@@ -231,6 +233,8 @@ def transcribe(
         log_prob_threshold=-1.0,
         no_speech_threshold=0.6,
         condition_on_previous_text=condition_on_previous_text,
+        initial_prompt=initial_prompt,
+        prompt_reset_on_temperature=prompt_reset_on_temperature,
         hotwords=hotwords or None,
     )
 
@@ -672,7 +676,9 @@ def main():
                 wav_path,
                 cfg["language"],
                 cfg["transcription"]["vad_filter"],
-                cfg["transcription"].get("condition_on_previous_text", False),
+                cfg["transcription"].get("condition_on_previous_text", True),
+                initial_prompt=cfg["transcription"].get("initial_prompt"),
+                prompt_reset_on_temperature=cfg["transcription"].get("prompt_reset_on_temperature", 0.5),
                 hotwords=normalize_hotwords(cfg["transcription"].get("hotwords")),
             )
 
